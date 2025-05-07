@@ -1,0 +1,105 @@
+{
+  "api_keys": {
+    "openai": "your-openai-api-key",
+    "anthropic": "your-anthropic-api-key",
+    "youtube": {
+      "client_id": "your-youtube-client-id",
+      "client_secret": "your-youtube-client-secret",
+      "refresh_token": "your-youtube-refresh-token"
+    }
+  },
+  "paths": {
+    "prompts_dir": "data/prompts_to_render",
+    "rendered_dir": "data/rendered_clips",
+    "final_dir": "data/ready_to_post",
+    "assets_dir": "assets",
+    "b_roll_dir": "assets/b_roll",
+    "branding_dir": "assets/branding"
+  },
+  "rendering": {
+    "comfyui": {
+      "api_url": "http://127.0.0.1:8188/prompt",
+      "workflow_file": "config/comfyui_animatediff_workflow.json"
+    },
+    "invokeai": {
+      "api_url": "http://127.0.0.1:9090/api/invocations",
+      "batch_size": 16
+    },
+    "local": true,
+    "draft_resolution": "720p",
+    "final_resolution": "1080p",
+    "fps": 24,
+    "default_duration": 3
+  },
+  "video": {
+    "add_captions": true,
+    "caption_style": {
+      "font": "Arial",
+      "font_size": 24,
+      "color": "white",
+      "stroke_color": "black",
+      "stroke_width": 2,
+      "position": "bottom"
+    },
+    "auto_b_roll": true,
+    "watermark": true,
+    "watermark_file": "logo_small.png",
+    "watermark_opacity": 0.7,
+    "watermark_position": "bottom-right"
+  },
+  "upload": {
+    "platforms": ["youtube", "tiktok"],
+    "schedule": false,
+    "youtube_category": "22",
+    "privacy_status": "public",
+    "tags_per_video": 10,
+    "auto_hashtags": true
+  },
+  "prompt_generation": {
+    "model": "gpt-4",
+    "anthropic_model": "claude-3-opus-20240229",
+    "temperature": 0.7,
+    "max_tokens": 500,
+    "default_prompt_count": 5,
+    "include_hashtags": true,
+    "default_niche": "productivity"
+  },
+  "branding": {
+    "channel_name": "Your Channel Name",
+    "tagline": "Your 20-word positioning statement here",
+    "primary_color": "#3498db",
+    "secondary_color": "#2ecc71",
+    "domain": "yourchannel.com",
+    "logo_file": "logo.png"
+  },
+  "compliance": {
+    "affiliate_disclaimer": "Some links may earn us a commission.",
+    "finance_disclaimer": "Not financial advice. Consider your own situation.",
+    "health_disclaimer": "Not medical advice. Consult a professional."
+  },
+  "api_prototype": {
+    "host": "0.0.0.0",
+    "port": 8000,
+    "debug": true,
+    "allow_origins": ["*"]
+  },
+  "notifications": {
+    "email": {
+      "enabled": false,
+      "smtp_server": "smtp.example.com",
+      "smtp_port": 587,
+      "smtp_user": "user@example.com",
+      "smtp_password": "your-smtp-password",
+      "from": "loopforge@example.com",
+      "to": ["your@email.com"]
+    },
+    "slack": {
+      "enabled": false,
+      "webhook_url": "https://hooks.slack.com/services/your/webhook/url"
+    },
+    "discord": {
+      "enabled": false,
+      "webhook_url": "https://discord.com/api/webhooks/your/webhook/url"
+    }
+  }
+}
