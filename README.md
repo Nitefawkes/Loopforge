@@ -91,6 +91,26 @@ Loop-forge/
     *   Edit `config/config.json` to add your API keys (OpenAI, Anthropic, YouTube) and configure notification settings (Email, Slack, Discord webhook URLs).
 4.  **Follow the detailed setup guide:** `docs/setup.md` for environment-specific instructions (FFmpeg, rendering engines, etc.).
 
+## 🖥️ Visual Pipeline: Streamlit GUI
+
+LoopForge now includes a no-code, user-friendly web interface for running the entire video pipeline!
+
+![LoopForge Streamlit GUI](assets/branding/loopforge_gui_screenshot.png)
+
+**Features:**
+- Select your video topic, prompt count, rendering engine, workflow, and upload platform
+- Advanced options for captions, B-roll, watermark, and scheduling
+- Live output logs and easy reset/download options
+- Config and API key checks for smooth onboarding
+
+**To launch the GUI:**
+```bash
+pip install streamlit
+python -m streamlit run gui.py
+```
+
+See the [User Guide in docs/setup.md](docs/setup.md#how-to-use-the-loopforge-gui) for a full walkthrough.
+
 ## Usage
 
 ### Configuration
