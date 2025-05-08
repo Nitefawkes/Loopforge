@@ -22,7 +22,7 @@ import time
 import json
 from datetime import datetime
 import glob
-from notifications import send_alert
+from src.notifications import send_alert
 
 # Add root directory to path for imports
 script_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
