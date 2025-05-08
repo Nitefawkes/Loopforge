@@ -64,12 +64,13 @@ def run_generate_stage(args, config):
             logger.error(f"Prompt generation failed with exit code {result.returncode}")
             send_alert("LoopForge: Prompt Generation Failed", f"Exit code: {result.returncode}\nSTDERR:\n{result.stderr}")
             return False
-        # Validate output
-        prompt_files = glob.glob(os.path.join(script_path, "data", "prompts_to_render", "*.json"))
-        logger.info(f"Prompts generated: {len(prompt_files)} in data/prompts_to_render/")
+        # Validate output using configured paths
+        prompts_dir_path = config.get("paths", {}).get("prompts_dir", os.path.join(script_path, "data", "prompts_to_render"))
+        prompt_files = glob.glob(os.path.join(prompts_dir_path, "*.json"))
+        logger.info(f"Prompts generated: {len(prompt_files)} in {prompts_dir_path}/")
         if len(prompt_files) == 0:
             logger.warning("No prompt files found after generation stage.")
-            send_alert("LoopForge: No Prompts Generated", "Prompt generation stage completed but no prompt files were found.")
+            # send_alert("LoopForge: No Prompts Generated", "Prompt generation stage completed but no prompt files were found.") # Alerting might be too noisy if it's a fresh run with no inputs yet
         return True
     except Exception as e:
         logger.error(f"Error running prompt generation: {e}")
@@ -95,12 +96,13 @@ def run_render_stage(args, config):
             logger.error(f"Rendering failed with exit code {result.returncode}")
             send_alert("LoopForge: Rendering Failed", f"Exit code: {result.returncode}\nSTDERR:\n{result.stderr}")
             return False
-        # Validate output
-        rendered_files = glob.glob(os.path.join(script_path, "data", "rendered_clips", "*.mp4"))
-        logger.info(f"Rendered clips: {len(rendered_files)} in data/rendered_clips/")
+        # Validate output using configured paths
+        rendered_dir_path = config.get("paths", {}).get("rendered_dir", os.path.join(script_path, "data", "rendered_clips"))
+        rendered_files = glob.glob(os.path.join(rendered_dir_path, "*.mp4")) # Assuming mp4, adjust if other formats are primary
+        logger.info(f"Rendered clips: {len(rendered_files)} in {rendered_dir_path}/")
         if len(rendered_files) == 0:
             logger.warning("No rendered clips found after rendering stage.")
-            send_alert("LoopForge: No Clips Rendered", "Rendering stage completed but no clips were found.")
+            # send_alert("LoopForge: No Clips Rendered", "Rendering stage completed but no clips were found.")
         return True
     except subprocess.TimeoutExpired:
         logger.error("Rendering stage timed out.")
@@ -130,12 +132,14 @@ def run_process_stage(args, config):
             logger.error(f"Video processing failed with exit code {result.returncode}")
             send_alert("LoopForge: Video Processing Failed", f"Exit code: {result.returncode}\nSTDERR:\n{result.stderr}")
             return False
-        # Validate output
-        processed_files = glob.glob(os.path.join(script_path, "data", "ready_to_post", "*.mp4"))
-        logger.info(f"Processed videos: {len(processed_files)} in data/ready_to_post/")
+        # Validate output using configured paths
+        # Assuming 'final_dir' from config is the 'ready_to_post' directory
+        processed_dir_path = config.get("paths", {}).get("final_dir", os.path.join(script_path, "data", "ready_to_post")) 
+        processed_files = glob.glob(os.path.join(processed_dir_path, "*.mp4")) # Assuming mp4
+        logger.info(f"Processed videos: {len(processed_files)} in {processed_dir_path}/")
         if len(processed_files) == 0:
             logger.warning("No processed videos found after processing stage.")
-            send_alert("LoopForge: No Videos Processed", "Processing stage completed but no processed videos were found.")
+            # send_alert("LoopForge: No Videos Processed", "Processing stage completed but no processed videos were found.")
         return True
     except subprocess.TimeoutExpired:
         logger.error("Processing stage timed out.")
@@ -254,6 +258,22 @@ def run_api_prototype(args, config):
         logger.error(f"Error running API prototype: {e}")
         return False
 
+def print_first_run_message(config):
+    first_run_file = os.path.join(script_path, ".loopforge_first_run")
+    if not os.path.exists(first_run_file):
+        print("\n" + "="*60)
+        print("🎉 Welcome to LoopForge! 🎉\n")
+        print("Thank you for installing LoopForge. If this is your first time:")
+        print("- See the Quick Start guide in docs/setup.md")
+        print("- Run `python check_setup.py` to check your environment")
+        print("- Your first video is just one command away:")
+        print("    python src/run_pipeline.py --all --topic 'your topic' --count 1\n")
+        print("If you have any issues, see the troubleshooting section in docs/setup.md or open an issue on GitHub.")
+        print("="*60 + "\n")
+        # Create the file to suppress future messages
+        with open(first_run_file, 'w') as f:
+            f.write("This file suppresses the LoopForge first-run welcome message.\n")
+
 def main():
     parser = argparse.ArgumentParser(description="LoopForge Pipeline Orchestrator")
     
@@ -287,14 +307,20 @@ def main():
                            help="Platforms to upload to")
     upload_group.add_argument("--dry-run", action="store_true", help="Simulate uploads without actually uploading")
     
+    parser.add_argument("--gui", action="store_true", help="Run the Streamlit GUI instead of CLI pipeline")
+
     args = parser.parse_args()
-    
-    # Load config
     config = load_config()
-    
-    # Run the requested stage or all stages
+    print_first_run_message(config)
+
+    if args.gui:
+        run_gui(args, config)
+        sys.exit(0) # Exit after GUI closes
+
     if args.all:
         run_all_stages(args, config)
+        logger.info("run_pipeline.main: Reached point before sys.exit(0) for --all")
+        sys.exit(0)
     elif args.stage:
         if args.stage == "generate":
             run_generate_stage(args, config)

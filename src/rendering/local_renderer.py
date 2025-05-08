@@ -26,6 +26,7 @@ import logging
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 from tenacity import retry, stop_after_attempt, wait_exponential, RetryError
+from . import get_available_renderers
 
 # Add root directory to path for imports
 script_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -584,53 +585,44 @@ class PromptHandler(FileSystemEventHandler):
             raise RenderError(str(e))
 
 def main():
-    """
-    Main function to run the local renderer
-    """
-    parser = argparse.ArgumentParser(description="Local Renderer for LoopForge")
-    parser.add_argument("--engine", choices=["comfyui", "invokeai"], default="comfyui", help="Rendering engine to use")
-    parser.add_argument("--workflow", type=str, help="Custom workflow file for ComfyUI")
+    parser = argparse.ArgumentParser(description="LoopForge Modular Renderer")
+    parser.add_argument("--engine", type=str, choices=list(get_available_renderers().keys()), required=True, help="Rendering engine to use")
+    parser.add_argument("--prompt", type=str, required=True, help="Prompt or prompt file")
+    parser.add_argument("--workflow", type=str, required=True, help="Workflow file")
+    parser.add_argument("--output", type=str, required=True, help="Output video path")
+    parser.add_argument("--show-options", action="store_true", help="Show supported options for the selected renderer")
+    # Accept arbitrary key=value pairs for renderer-specific options
+    parser.add_argument("--option", action="append", help="Renderer-specific option in key=value format")
     args = parser.parse_args()
-    
+
+    renderers = get_available_renderers()
+    if args.engine not in renderers:
+        print(f"Renderer '{args.engine}' not found.")
+        sys.exit(1)
+    renderer = renderers[args.engine]()
+
+    if args.show_options:
+        print(f"Supported options for {args.engine}:")
+        for k, v in renderer.get_supported_options().items():
+            print(f"  {k}: {v}")
+        sys.exit(0)
+
+    if not renderer.validate_environment():
+        print(f"Environment for {args.engine} is not ready. Please check your installation.")
+        sys.exit(1)
+
+    # Parse renderer-specific options
+    options = {}
+    if args.option:
+        for opt in args.option:
+            if '=' in opt:
+                k, v = opt.split('=', 1)
+                options[k.strip()] = v.strip()
     try:
-        logger.info("Starting LoopForge Local Renderer")
-        logger.info(f"Rendering engine: {args.engine}")
-        if args.workflow:
-            logger.info(f"Custom workflow file: {args.workflow}")
-        
-        # Load configuration
-        config = load_config()
-        
-        # Create event handler
-        handler = PromptHandler(config, args.engine, args.workflow)
-        
-        # Create and start observer
-        prompts_dir = handler.prompts_dir
-        observer = Observer()
-        observer.schedule(handler, prompts_dir, recursive=False)
-        observer.start()
-        logger.info(f"Watching for new prompt files in: {prompts_dir}")
-        
-        # Process existing prompts
-        handler.process_queue()
-        
-        try:
-            # Run indefinitely
-            while True:
-                time.sleep(5)
-                handler.process_queue()
-        except KeyboardInterrupt:
-            logger.info("Stopping renderer (Ctrl+C pressed)")
-            observer.stop()
-        
-        observer.join()
-        logger.info("Renderer stopped")
-        
+        result = renderer.render(args.prompt, args.workflow, args.output, **options)
+        print(f"Render complete: {result}")
     except Exception as e:
-        error_msg = f"Unexpected error in renderer: {e}"
-        logger.error(error_msg, exc_info=True)
-        if notifications_available:
-            send_alert("LoopForge: Renderer Error", error_msg)
+        print(f"Render failed: {e}")
         sys.exit(1)
 
 if __name__ == "__main__":

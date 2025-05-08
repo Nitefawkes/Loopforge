@@ -27,54 +27,63 @@
 - [x] Set up automatic test runs on push and pull requests
 
 ## Current Testing Status
-- **Total Coverage**: 20%
+- **Total Coverage**: [Placeholder - Should be updated via coverage report]
 - **Key Module Coverage**:
-  - Notifications: 84%
-  - Pipeline Orchestrator: 59%
-  - Other modules: Need additional testing in Phase 2
+  - Notifications: [From report]
+  - Pipeline Orchestrator (`run_pipeline.py`): [From report]
+  - Prompt Generation: [From report]
+  - Rendering (`local_renderer.py`, `comfyui.py`, `invokeai.py`): [From report]
+  - Post-processing: [From report]
+  - Upload: [From report]
 
 ## Phase 2: Enhancement (IN PROGRESS)
-- [ ] Improve UI/UX for better usability
+- [ ] Improve UI/UX for better usability (See GUI development)
 - [x] Enhance error handling and resilience
   - [x] Implemented robust error handling in prompt_generation module
   - [x] Implemented robust error handling in rendering module
   - [x] Implemented robust error handling in post_processing module
   - [x] Added retry logic for API calls
   - [x] Added validation for generated content
-  - [ ] Pending implementation in upload module
-- [ ] Increase test coverage for remaining modules:
-  - [x] `prompt_generation` (100% coverage achieved)
-  - [x] `rendering` (comprehensive test suite implemented)
-  - [x] `post_processing` (test suite implemented)
-  - [ ] `upload`
+  - [x] Implemented error handling and validation in upload module
+- [x] Increase test coverage for remaining modules:
+  - [x] `prompt_generation`
+  - [x] `rendering` (Unit tests for BaseRenderers & E2E pipeline tests added)
+  - [x] `post_processing`
+  - [x] `upload`
 - [ ] Implement performance optimizations
 - [ ] Add batch processing capabilities
 
-## Latest Improvements (June 22, 2023)
-- Enhanced the post-processing module with:
-  - Input validation for video files
-  - Comprehensive exception handling for all operations
-  - Retry logic for critical operations like FFmpeg and Whisper
-  - Improved logging with detailed status information
-  - Notifications for processing successes and failures
-  - Enhanced configuration options for watermarks and B-roll
-- Added comprehensive test suite for post-processing covering:
-  - Caption generation
-  - Seamless loop creation
-  - B-roll integration
-  - Watermarking
-  - Error handling
-- Enhanced the rendering module with:
-  - Better exception handling with specific error types
-  - Retry logic for API calls to rendering engines
-  - Validation of prompt data before rendering
-  - Integration with notification system
-  - Improved logging and error reporting
-  - Comprehensive unit test coverage
+## Phase 3: GUI & User Experience (IN PROGRESS)
+- [x] Develop Streamlit GUI (`gui.py`) for user-friendly pipeline execution
+- [x] Add configuration checks and previews to GUI
+- [x] Add batch topic input to GUI
+- [x] Add progress indicators and live logging to GUI
+- [x] Add asset pickers and notification toggles to GUI
+- [x] Integrate modular renderer options into GUI
+- [x] Add Demo Mode for easy onboarding
+- [x] Refine GUI layout and styling
+
+## Phase 4: Documentation & Onboarding (COMPLETED)
+- [x] Rewrite `docs/setup.md` with Quick Start & Checklist
+- [x] Add first-run welcome message
+- [x] Create `check_setup.py` script
+- [x] Update README with GUI section
+- [x] Add example ComfyUI workflow
+- [x] Add placeholder branding assets
+
+## Latest Improvements ([Current Date])
+- Added comprehensive unit tests for `ComfyUIRenderer` and `InvokeAIRenderer`.
+- Implemented end-to-end integration tests for the main pipeline (`run_pipeline.py`), mocking external processes.
+- Fixed path usage in `run_pipeline.py` stage validation to use configured paths.
+- Resolved various test failures related to mocking and script execution flow.
+- Updated status documentation.
 
 ## Next Steps
-1. Continue implementation of Phase 2 tasks
-2. Add error handling and test coverage for rendering module
-3. Address bug fixes and improvements identified during testing
+- [ ] Create `docs/technical.md` to document architecture and testing strategy.
+- [ ] Create `tasks/tasks.md` for better task tracking.
+- [ ] Run code coverage report and update status.
+- [ ] Implement performance optimizations.
+- [ ] Add batch processing capabilities.
+- [ ] Continue UI/UX refinements.
 
-**Last Updated**: June 22, 2023 
+**Last Updated**: [Current Date - e.g., May 8, 2025] 

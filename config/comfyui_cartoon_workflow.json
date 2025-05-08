@@ -1,0 +1,19 @@
+{
+  "workflow_name": "Cartoon/Anime Style Example",
+  "description": "A simple ComfyUI workflow for generating cartoon/anime style looping videos. Edit this file in ComfyUI for your own needs.",
+  "nodes": [
+    {"id": 1, "type": "CLIPTextEncode", "title": "Prompt (Positive)", "value": "a looping animation of a cute cartoon cat, anime style, vibrant colors"},
+    {"id": 2, "type": "CLIPTextEncode", "title": "Prompt (Negative)", "value": "blurry, low quality, watermark, text"},
+    {"id": 3, "type": "EmptyLatentImage", "title": "Latent Image", "value": [512, 512, 16]},
+    {"id": 4, "type": "KSampler", "title": "Sampler", "value": {"steps": 30, "cfg": 7.0, "seed": 12345}},
+    {"id": 5, "type": "VAEDecode", "title": "Decode"},
+    {"id": 6, "type": "SaveImage", "title": "Save Output"}
+  ],
+  "links": [
+    {"from": 1, "to": 4, "input": "positive"},
+    {"from": 2, "to": 4, "input": "negative"},
+    {"from": 3, "to": 4, "input": "latent_image"},
+    {"from": 4, "to": 5, "input": "image"},
+    {"from": 5, "to": 6, "input": "image"}
+  ]
+} 

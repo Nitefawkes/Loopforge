@@ -1,161 +1,162 @@
-# LoopForge Setup Guide
+# 🚀 LoopForge Quick Start Setup Guide
 
-This guide will walk you through setting up the LoopForge environment and tools.
+Welcome! This guide will help you create your first looping video in minutes—even if you're brand new to Python or AI tools.
 
-## Phase 0: Local Dev Environment Setup
+---
 
-### Python Installation
+## ✅ Quick Start Checklist
 
-1. Download and install Python 3.8+ from [python.org](https://www.python.org/downloads/)
-2. During installation, ensure "Add Python to PATH" is checked
-3. Verify installation with:
-   ```
-   python --version
-   ```
+1. **Install Prerequisites**
+   - [ ] Python 3.8+ (`python --version`)
+   - [ ] FFmpeg (`ffmpeg -version`)
+   - [ ] (Recommended) NVIDIA GPU with drivers
 
-### FFmpeg Installation
-
-1. Download FFmpeg from [ffmpeg.org](https://ffmpeg.org/download.html)
-2. Extract to a location of your choice (e.g., `C:\FFmpeg`)
-3. Add FFmpeg to your PATH:
-   - Windows: Add `C:\FFmpeg\bin` to your system PATH
-   - Mac/Linux: `export PATH=$PATH:/path/to/ffmpeg/bin`
-4. Verify installation with:
-   ```
-   ffmpeg -version
+2. **Clone and Install**
+   ```bash
+   git clone https://github.com/Nitefawkes/Loopforge.git
+   cd Loopforge
+   pip install -r requirements.txt
    ```
 
-### Local Stable Diffusion / AnimateDiff Setup
+3. **Configure**
+   ```bash
+   cp config/config.example.json config/config.json
+   # Edit config/config.json and add your API keys (OpenAI, YouTube, etc.)
+   # You can start without keys, but some features will be limited.
+   ```
 
-You can choose either InvokeAI or ComfyUI:
+4. **First Video (One Command!)**
+   ```bash
+   python src/run_pipeline.py --all --topic "cats" --count 1
+   ```
+   - Your video will be generated and appear in `data/ready_to_post/`.
+
+5. **Explore & Customize**
+   - Try changing the topic or count.
+   - Check out `config/` for example ComfyUI workflows.
+   - Use default branding assets in `assets/branding/` or add your own.
+
+---
+
+## 🖥️ How to Use the LoopForge GUI
+
+The LoopForge GUI makes it easy to generate and publish videos without using the command line.
+
+### 1. **Install Streamlit**
+If you haven't already, install Streamlit:
+```bash
+pip install streamlit
+```
+
+### 2. **Launch the GUI**
+From your project root directory, run:
+```bash
+python -m streamlit run gui.py
+```
+This will open the LoopForge GUI in your web browser.
+
+### 3. **Using the GUI**
+- **Logo/Branding:** If you have a logo at `assets/branding/logo.png`, it will be displayed at the top.
+- **Config Check:** The GUI will check your config and warn if any API keys are missing.
+- **Fill Out the Form:**
+  - **Video Topic:** What your video should be about.
+  - **Prompt Count:** How many prompts/videos to generate.
+  - **Rendering Engine:** Choose from available engines (e.g., comfyui, invoke).
+  - **Workflow File:** Select from detected workflow files in `config/` (e.g., `comfyui_animatediff_workflow.json`, `comfyui_cartoon_workflow.json`).
+  - **Branding & Assets:** Choose from bundled example logos (`logo.png`, `logo_alt.png`), watermarks (`watermark_demo.png`), and B-roll (`nature_broll.mp4`).
+  - **Upload Platform:** Where to upload the final video (e.g., YouTube, TikTok).
+  - **Dry Run:** If checked, the upload will be simulated only.
+  - **Advanced Options:** Expand to skip captions, add B-roll, add watermark, or schedule upload.
+- **Summary:** Before running, a summary of your selections will be shown.
+- **Run Pipeline:** Click 'Run Pipeline' to start. Output logs will appear live in the GUI.
+- **Download Log:** After completion, you can download the output log.
+- **Reset:** Use the 'Reset Form' button to clear your selections.
+
+### 4. **Troubleshooting**
+- If the GUI doesn't launch, make sure Streamlit is installed and use the full command above.
+- If you see missing API key warnings, edit `config/config.json` and add your keys.
+- If the pipeline fails, check the output log and see the troubleshooting section below.
+
+---
+
+## 🆘 Troubleshooting
+
+- **ffmpeg not found:** [Download FFmpeg](https://ffmpeg.org/download.html) and add it to your PATH.
+- **CUDA/GPU not available:** Make sure you have the correct NVIDIA drivers and CUDA toolkit.
+- **API key errors:** Double-check your keys in `config/config.json`.
+- **Permission errors:** Try running your terminal as administrator.
+- **Video not generated:** Check the logs printed in your terminal for error messages.
+
+---
+
+## 📦 Folder Structure (What Goes Where)
+
+- `data/prompts_to_render/` — Generated prompts waiting to be rendered
+- `data/rendered_clips/` — Raw output from Stable Diffusion/AnimateDiff
+- `data/ready_to_post/` — Final videos ready for publishing
+- `assets/branding/` — Default logo, watermark, and branding elements (e.g., `logo.png`, `logo_alt.png`, `watermark_demo.png`)
+- `assets/b_roll/` — Example B-roll footage for automatic inclusion (e.g., `nature_broll.mp4`)
+- `config/` — Example ComfyUI workflows and configuration files (e.g., `comfyui_animatediff_workflow.json`, `comfyui_cartoon_workflow.json`)
+
+---
+
+## 🛠️ Advanced/Optional Setup
+
+### Local Stable Diffusion / AnimateDiff
+
+You can use either InvokeAI or ComfyUI (recommended for flexibility):
 
 #### Option 1: InvokeAI
+- [InvokeAI GitHub](https://github.com/invoke-ai/InvokeAI)
+- Install AnimateDiff extension:
+  ```
+  invokeai-ti --install-model "AnimateDiff"
+  ```
 
-1. Follow the installation guide at [InvokeAI GitHub](https://github.com/invoke-ai/InvokeAI)
-2. Install AnimateDiff extension:
-   ```
-   invokeai-ti --install-model "AnimateDiff"
-   ```
+#### Option 2: ComfyUI (Recommended)
+- Clone and install:
+  ```
+  git clone https://github.com/comfyanonymous/ComfyUI
+  cd ComfyUI
+  pip install -r requirements.txt
+  ```
+- Install AnimateDiff custom node:
+  ```
+  cd custom_nodes
+  git clone https://github.com/continue-revolution/sd-webui-animatediff
+  cd sd-webui-animatediff
+  pip install -r requirements.txt
+  ```
+- Use the example workflow in `config/comfyui_example_workflow.json`.
 
-#### Option 2: ComfyUI (Recommended for flexibility)
+### API Keys
+- Add your OpenAI, Anthropic, and YouTube API keys to `config/config.json` for full functionality.
 
-1. Clone the ComfyUI repository:
-   ```
-   git clone https://github.com/comfyanonymous/ComfyUI
-   cd ComfyUI
-   ```
-2. Install requirements:
-   ```
-   pip install -r requirements.txt
-   ```
-3. Install the AnimateDiff custom node:
-   ```
-   cd custom_nodes
-   git clone https://github.com/continue-revolution/sd-webui-animatediff
-   cd sd-webui-animatediff
-   pip install -r requirements.txt
-   ```
-
-### Python Libraries Installation
-
-Install the required libraries:
-
-```
-pip install moviepy openai-whisper anthropic openai python-dotenv yt-upload pillow fastapi uvicorn
-```
-
-### API Keys Configuration
-
-1. Create a copy of the example config file:
-   ```
-   cp config/config.example.json config/config.json
-   ```
-2. Edit `config.json` to add your API keys:
-   - OpenAI API Key
-   - Claude/Anthropic API Key
-   - YouTube API credentials (for automated uploads)
-
-## Phase 1: Core Pipeline Scripts
-
-### Script Setup
-
-1. The repository contains template scripts in the `src` directory
-2. Each script has detailed comments explaining its function
-3. Before running, make necessary adjustments for your specific setup
-
-### Testing the Pipeline
-
-1. Run a simple test with the prompt generator:
-   ```
-   python src/prompt_generation/generate_prompts.py --topic "space exploration" --count 3
-   ```
-2. Check the `data/prompts_to_render` directory for output
-3. Run the renderer script:
-   ```
-   python src/rendering/local_renderer.py
-   ```
-4. Run post-processing:
-   ```
-   python src/post_processing/process_video.py
-   ```
-
-## Phase 2: MVP Prototype Setup
-
-### FastAPI Local Prototype
-
-1. Navigate to the `api_prototype` directory
-2. Run the development server:
-   ```
-   uvicorn main:app --reload
-   ```
-3. Access the API at `http://localhost:8000/docs`
+### FastAPI Local Prototype (Optional)
+- Navigate to `api_prototype/` and run:
+  ```
+  uvicorn main:app --reload
+  ```
+- Access the API at [http://localhost:8000/docs](http://localhost:8000/docs)
 
 ### Replit Deployment (Optional)
+- See the original guide for Replit deployment steps.
 
-1. Create a new Replit project
-2. Upload the contents of the `api_prototype` directory
-3. Add your API keys as environment variables in Replit
-4. Run the server with the command: `uvicorn main:app --host 0.0.0.0 --port 8080`
+---
 
-## Folder Structure Explanation
+## 📚 Resources & Help
+- [FFmpeg Documentation](https://ffmpeg.org/documentation.html)
+- [MoviePy Documentation](https://zulko.github.io/moviepy/)
+- [OpenAI Whisper Documentation](https://github.com/openai/whisper)
+- [LoopForge GitHub Issues](https://github.com/Nitefawkes/Loopforge/issues)
 
-- `data/prompts_to_render`: Storage for generated prompts waiting to be rendered
-- `data/rendered_clips`: Raw output from Stable Diffusion/AnimateDiff
-- `data/ready_to_post`: Final videos with captions, loops, etc. ready for publishing
-- `assets/branding`: Add your logo and branding elements here
-- `assets/b_roll`: Add stock B-roll footage here for automatic inclusion
+---
 
-## Troubleshooting
+## 🎉 Next Steps
+- Try editing the topic or count to make more videos!
+- Explore and customize workflows and branding.
+- Join the community or open an issue if you get stuck.
 
-### Common Issues
+---
 
-1. **FFmpeg not found**: Ensure FFmpeg is properly added to your PATH
-2. **GPU errors**: Make sure your GPU drivers are up to date
-3. **API rate limiting**: Implement proper rate limit handling in your scripts
-4. **Video generation failures**: Start with simpler prompts and gradually increase complexity
-
-### Getting Help
-
-- Check the logs in the console for error messages
-- Refer to the documentation for each tool:
-  - [FFmpeg Documentation](https://ffmpeg.org/documentation.html)
-  - [MoviePy Documentation](https://zulko.github.io/moviepy/)
-  - [OpenAI Whisper Documentation](https://github.com/openai/whisper)
-
-# === LoopForge Progress Snapshot (Operational Status) ===
-
-## Notification & Alerting System
-- Multi-channel notifications (Email, Slack, Discord) are now supported for pipeline events.
-- Alerts are sent on pipeline failures, timeouts, and successful completions, as well as for video processing and upload completions.
-- Configure notification settings in `config/config.json` under the `notifications` section.
-
-## Reliability & Logging
-- Pipeline logs stdout/stderr for each stage, checks for expected outputs, and provides granular logging.
-- On any error or failure, the pipeline exits with a nonzero code and sends an alert if notifications are enabled.
-- A summary of pipeline stage results is printed and logged at the end.
-
-## Current Status (Snapshot)
-- End-to-end pipeline is operational and can be triggered via CLI or API.
-- All major stages (prompt generation, rendering, processing, upload) are integrated and monitored.
-- Notification system is in place for both errors and successful completions.
-- See README for more details and configuration instructions.
+**You're ready to create your first looping video!**

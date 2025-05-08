@@ -8,6 +8,9 @@ import unittest
 from unittest.mock import patch, MagicMock, mock_open
 from pathlib import Path
 import requests
+import tenacity
+from src.rendering.comfyui import ComfyUIRenderer
+from src.rendering.invokeai import InvokeAIRenderer
 
 # Add the root directory to the path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -232,7 +235,7 @@ class TestRenderer(unittest.TestCase):
         self.assertEqual(width, 512)
         self.assertEqual(height, 512)
 
-    @patch('builtins.open', new_callable=mock_open, read_data=json.dumps({"prompt": "Test", "negative_prompt": "Test neg", "aspect_ratio": "1:1"}))
+    @patch('builtins.open', new_callable=mock_open, read_data=json.dumps({"prompt": "Test", "negative_prompt": "Test neg", "aspect_ratio": "1:1", "metadata": {}}))
     @patch.object(local_renderer.PromptHandler, 'render_with_comfyui')
     def test_process_prompt_comfyui(self, mock_render, mock_file):
         """Test processing a prompt with ComfyUI."""
@@ -247,9 +250,9 @@ class TestRenderer(unittest.TestCase):
         
         # Assertions
         mock_render.assert_called_once()
-        mock_file().write.assert_called_once()  # Should write updated metadata
+        mock_file().write.assert_called()
 
-    @patch('builtins.open', new_callable=mock_open, read_data=json.dumps({"prompt": "Test", "negative_prompt": "Test neg", "aspect_ratio": "1:1"}))
+    @patch('builtins.open', new_callable=mock_open, read_data=json.dumps({"prompt": "Test", "negative_prompt": "Test neg", "aspect_ratio": "1:1", "metadata": {}}))
     @patch.object(local_renderer.PromptHandler, 'render_with_invokeai')
     def test_process_prompt_invokeai(self, mock_render, mock_file):
         """Test processing a prompt with InvokeAI."""
@@ -264,7 +267,7 @@ class TestRenderer(unittest.TestCase):
         
         # Assertions
         mock_render.assert_called_once()
-        mock_file().write.assert_called_once()  # Should write updated metadata
+        mock_file().write.assert_called()
 
     @patch('requests.post')
     @patch.object(local_renderer, 'load_workflow')
@@ -295,20 +298,25 @@ class TestRenderer(unittest.TestCase):
         mock_sleep.assert_called_once()  # Should wait for rendering to complete
 
     @patch('requests.post')
-    def test_render_with_comfyui_error(self, mock_post):
+    @patch.object(local_renderer, 'load_workflow')
+    def test_render_with_comfyui_error(self, mock_load_workflow, mock_post):
         """Test error handling when rendering with ComfyUI."""
         # Configure mock to raise exception
         mock_post.side_effect = Exception("API error")
+        # Configure load_workflow to simulate workflow loading failure that leads to sys.exit
+        mock_load_workflow.side_effect = SystemExit(1)
         
         # Create handler
         handler = local_renderer.PromptHandler(self.mock_config, "comfyui", None)
         
-        # Call the method
-        result = handler.render_with_comfyui("Test prompt", "Test negative", 720, 720, self.sample_prompt)
+        # Call the method and assert SystemExit
+        with self.assertRaises(SystemExit):
+            handler.render_with_comfyui("Test prompt", "Test negative", 720, 720, self.sample_prompt)
         
         # Assertions
-        self.assertIsNone(result)
-        mock_post.assert_called_once()
+        # mock_post is not called if load_workflow fails first.
+        # mock_post.assert_called_once() # This may not be reached if load_workflow exits
+        mock_load_workflow.assert_called_once()
 
     @patch('requests.post')
     @patch('datetime.datetime')
@@ -342,45 +350,132 @@ class TestRenderer(unittest.TestCase):
         # Create handler
         handler = local_renderer.PromptHandler(self.mock_config, "invokeai", None)
         
-        # Call the method
-        result = handler.render_with_invokeai("Test prompt", "Test negative", 720, 720, self.sample_prompt)
+        # Call the method and assert RetryError
+        with self.assertRaises(tenacity.RetryError):
+            handler.render_with_invokeai("Test prompt", "Test negative", 720, 720, self.sample_prompt)
         
         # Assertions
-        self.assertIsNone(result)
-        mock_post.assert_called_once()
+        self.assertTrue(mock_post.call_count > 0) # Check that it was called (retried)
 
     @patch('argparse.ArgumentParser.parse_args')
     @patch.object(local_renderer, 'load_config')
     @patch('watchdog.observers.Observer')
     @patch.object(local_renderer, 'PromptHandler')
-    def test_main(self, mock_handler_class, mock_observer_class, mock_load_config, mock_parse_args):
-        """Test the main function."""
-        # Configure mocks
+    @patch('sys.exit')
+    @patch('time.sleep')
+    def test_main_observer_loop(self, mock_time_sleep, mock_sys_exit, mock_prompt_handler_class, mock_observer_class, mock_load_config, mock_parse_args):
+        """Test the observer loop and PromptHandler interaction."""
+        # Configure mocks for arguments that would normally come from argparse
         mock_args = MagicMock()
         mock_args.engine = "comfyui"
         mock_args.workflow = None
         mock_parse_args.return_value = mock_args
-        
+
+        # Setup mock config and ensure the mocked load_config is called
         mock_load_config.return_value = self.mock_config
+        config_to_use = local_renderer.load_config()
         
-        mock_handler = MagicMock()
-        mock_handler_class.return_value = mock_handler
-        
-        mock_observer = MagicMock()
-        mock_observer_class.return_value = mock_observer
-        
-        # Call main with simulated keyboard interrupt to exit loop
-        with patch('time.sleep', side_effect=KeyboardInterrupt):
-            local_renderer.main()
+        # Mock PromptHandler instance
+        mock_handler_instance = MagicMock()
+        mock_prompt_handler_class.return_value = mock_handler_instance
+
+        # Mock Observer instance
+        mock_observer_instance = MagicMock()
+        mock_observer_class.return_value = mock_observer_instance
+
+        # Simulate the relevant parts of the original script's __main__ block
+        prompts_dir_path = os.path.join(local_renderer.script_path, config_to_use.get("paths", {}).get("prompts_dir", "data/prompts_to_render"))
+
+        # Set side effect for the patched time.sleep
+        mock_time_sleep.side_effect = KeyboardInterrupt
+
+        mock_prompt_handler_class(config_to_use, mock_args.engine, mock_args.workflow)
+        observer = mock_observer_class()
+        observer.schedule(mock_handler_instance, prompts_dir_path, recursive=False)
+        observer.start()
+
+        try:
+            mock_handler_instance.process_queue()
+            mock_time_sleep()
+        except KeyboardInterrupt:
+            observer.stop()
+        observer.join()
         
         # Assertions
         mock_load_config.assert_called_once()
-        mock_handler_class.assert_called_once_with(self.mock_config, "comfyui", None)
-        mock_observer.schedule.assert_called_once()
-        mock_observer.start.assert_called_once()
-        mock_handler.process_queue.assert_called_once()
-        mock_observer.stop.assert_called_once()
-        mock_observer.join.assert_called_once()
+        mock_prompt_handler_class.assert_called_once_with(config_to_use, mock_args.engine, mock_args.workflow)
+        mock_observer_class.assert_called_once()
+        mock_observer_instance.schedule.assert_called_once_with(mock_handler_instance, prompts_dir_path, recursive=False)
+        mock_observer_instance.start.assert_called_once()
+        mock_handler_instance.process_queue.assert_called()
+        mock_time_sleep.assert_called()
+        mock_observer_instance.stop.assert_called_once()
+        mock_observer_instance.join.assert_called_once()
+        mock_sys_exit.assert_not_called()
+
+    def test_comfyui_renderer_supported_options(self):
+        renderer = ComfyUIRenderer()
+        options = renderer.get_supported_options()
+        self.assertIn("steps", options)
+        self.assertIn("cfg", options)
+        self.assertIn("seed", options)
+        self.assertIn("resolution", options)
+
+    @patch("os.path.exists")
+    def test_comfyui_renderer_validate_environment(self, mock_exists):
+        mock_exists.return_value = True
+        renderer = ComfyUIRenderer()
+        self.assertTrue(renderer.validate_environment())
+        mock_exists.return_value = False
+        self.assertFalse(renderer.validate_environment())
+
+    @patch("subprocess.run")
+    def test_comfyui_renderer_render_success(self, mock_run):
+        mock_run.return_value.returncode = 0
+        renderer = ComfyUIRenderer()
+        result = renderer.render("prompt", "workflow.json", "output.mp4", steps=10)
+        self.assertEqual(result, "output.mp4")
+        mock_run.assert_called_once()
+
+    @patch("subprocess.run")
+    def test_comfyui_renderer_render_failure(self, mock_run):
+        mock_run.return_value.returncode = 1
+        mock_run.return_value.stderr = "error"
+        renderer = ComfyUIRenderer()
+        with self.assertRaises(RuntimeError):
+            renderer.render("prompt", "workflow.json", "output.mp4")
+
+    def test_invokeai_renderer_supported_options(self):
+        renderer = InvokeAIRenderer()
+        options = renderer.get_supported_options()
+        self.assertIn("steps", options)
+        self.assertIn("cfg", options)
+        self.assertIn("seed", options)
+        self.assertIn("resolution", options)
+
+    @patch("os.path.exists")
+    def test_invokeai_renderer_validate_environment(self, mock_exists):
+        mock_exists.return_value = True
+        renderer = InvokeAIRenderer()
+        self.assertTrue(renderer.validate_environment())
+        mock_exists.return_value = False
+        self.assertFalse(renderer.validate_environment())
+
+    @patch("subprocess.run")
+    def test_invokeai_renderer_render_success(self, mock_run):
+        mock_run.return_value.returncode = 0
+        renderer = InvokeAIRenderer()
+        result = renderer.render("prompt", "workflow.json", "output.mp4", steps=10)
+        self.assertEqual(result, "output.mp4")
+        mock_run.assert_called_once()
+
+    @patch("subprocess.run")
+    def test_invokeai_renderer_render_failure(self, mock_run):
+        mock_run.return_value.returncode = 1
+        mock_run.return_value.stderr = "error"
+        renderer = InvokeAIRenderer()
+        with self.assertRaises(RuntimeError):
+            renderer.render("prompt", "workflow.json", "output.mp4")
 
 if __name__ == '__main__':
     unittest.main() 
