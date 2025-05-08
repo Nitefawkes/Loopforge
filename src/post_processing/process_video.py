@@ -34,6 +34,7 @@ import random
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 import moviepy.editor as mp
+from tenacity import retry, stop_after_attempt, wait_exponential, RetryError
 from notifications import send_alert
 
 # Add root directory to path for imports
@@ -44,52 +45,196 @@ sys.path.append(script_path)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# Import notifications if available
+try:
+    from src.notifications import send_alert
+    notifications_available = True
+except ImportError:
+    notifications_available = False
+    logger.warning("Notifications module not available. Alerts will not be sent.")
+
+class ConfigError(Exception):
+    """Exception raised for configuration issues."""
+    pass
+
+class ProcessingError(Exception):
+    """Exception raised for video processing issues."""
+    pass
+
+class ValidationError(Exception):
+    """Exception raised for validation issues."""
+    pass
+
+class CaptionError(Exception):
+    """Exception raised for captioning issues."""
+    pass
+
+class BRollError(Exception):
+    """Exception raised for B-roll processing issues."""
+    pass
+
+class WatermarkError(Exception):
+    """Exception raised for watermarking issues."""
+    pass
+
 def load_config():
-    """Load configuration from config.json file"""
+    """
+    Load configuration from config.json file
+    
+    Returns:
+        dict: Configuration data
+    
+    Raises:
+        ConfigError: If config file is missing or invalid
+    """
     config_path = os.path.join(script_path, "config", "config.json")
     try:
         with open(config_path, 'r') as f:
-            return json.load(f)
+            config = json.load(f)
+            logger.info("Configuration loaded successfully")
+            return config
     except FileNotFoundError:
-        logger.error(f"Config file not found at {config_path}")
+        error_msg = f"Config file not found at {config_path}"
+        logger.error(error_msg)
         logger.error("Please copy config.example.json to config.json and add your API keys")
+        if notifications_available:
+            send_alert("LoopForge: Configuration Error", error_msg)
+        sys.exit(1)
+    except json.JSONDecodeError as e:
+        error_msg = f"Invalid JSON in config file: {e}"
+        logger.error(error_msg)
+        if notifications_available:
+            send_alert("LoopForge: Configuration Error", error_msg)
         sys.exit(1)
 
-def find_prompt_data(video_path, config):
-    """Find the prompt data associated with a rendered video"""
-    prompts_dir = os.path.join(script_path, config.get("paths", {}).get("prompts_dir", "data/prompts_to_render"))
-    video_filename = os.path.basename(video_path)
+def validate_video_file(video_path):
+    """
+    Validate video file exists and has valid format
     
-    # Look for prompt files with matching output_path
-    for filename in os.listdir(prompts_dir):
-        if filename.endswith(".json"):
-            file_path = os.path.join(prompts_dir, filename)
-            try:
-                with open(file_path, 'r') as f:
-                    prompt_data = json.load(f)
-                
-                metadata = prompt_data.get("metadata", {})
-                output_path = metadata.get("output_path", "")
-                
-                if output_path and os.path.basename(output_path) == video_filename:
-                    return prompt_data, file_path
-            except Exception as e:
-                logger.error(f"Error reading prompt file {file_path}: {e}")
+    Args:
+        video_path (str): Path to video file
     
-    return None, None
+    Returns:
+        bool: True if valid
+    
+    Raises:
+        ValidationError: If video file is invalid
+    """
+    if not os.path.exists(video_path):
+        raise ValidationError(f"Video file not found: {video_path}")
+    
+    if not os.path.isfile(video_path):
+        raise ValidationError(f"Not a file: {video_path}")
+    
+    # Check extension
+    valid_extensions = ['.mp4', '.mov', '.avi', '.webm']
+    if not any(video_path.lower().endswith(ext) for ext in valid_extensions):
+        raise ValidationError(f"Invalid video file extension: {video_path}")
+    
+    # Check if the file is actually a video using ffprobe
+    try:
+        cmd = [
+            "ffprobe",
+            "-v", "error",
+            "-select_streams", "v:0",
+            "-show_entries", "stream=codec_type",
+            "-of", "json",
+            video_path
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        data = json.loads(result.stdout)
+        
+        # Check if there's a video stream
+        streams = data.get("streams", [])
+        if not streams or streams[0].get("codec_type") != "video":
+            raise ValidationError(f"File does not contain a valid video stream: {video_path}")
+        
+        return True
+    except subprocess.CalledProcessError as e:
+        raise ValidationError(f"Error validating video with ffprobe: {e}")
+    except json.JSONDecodeError as e:
+        raise ValidationError(f"Error parsing ffprobe output: {e}")
+    except Exception as e:
+        raise ValidationError(f"Unexpected error validating video: {e}")
 
-def generate_captions(video_path):
-    """Generate captions for a video using OpenAI Whisper"""
-    logger.info(f"Generating captions for {video_path}")
+def find_prompt_data(video_path, config):
+    """
+    Find the prompt data associated with a rendered video
     
-    # Create a temporary directory for output
-    temp_dir = os.path.join(os.path.dirname(video_path), "temp_captions")
-    os.makedirs(temp_dir, exist_ok=True)
+    Args:
+        video_path (str): Path to video file
+        config (dict): Configuration data
     
-    # Output SRT file path
-    srt_path = os.path.join(temp_dir, f"{os.path.splitext(os.path.basename(video_path))[0]}.srt")
+    Returns:
+        tuple: (prompt_data, file_path) or (None, None) if not found
+    
+    Raises:
+        ProcessingError: If an error occurs during prompt search
+    """
+    video_filename = os.path.basename(video_path)
+    logger.info(f"Looking for prompt data for {video_filename}")
     
     try:
+        prompts_dir = os.path.join(script_path, config.get("paths", {}).get("prompts_dir", "data/prompts_to_render"))
+        
+        if not os.path.exists(prompts_dir):
+            logger.warning(f"Prompts directory not found: {prompts_dir}")
+            return None, None
+        
+        # Look for prompt files with matching output_path
+        for filename in os.listdir(prompts_dir):
+            if filename.endswith(".json"):
+                file_path = os.path.join(prompts_dir, filename)
+                try:
+                    with open(file_path, 'r') as f:
+                        prompt_data = json.load(f)
+                    
+                    metadata = prompt_data.get("metadata", {})
+                    output_path = metadata.get("output_path", "")
+                    
+                    if output_path and os.path.basename(output_path) == video_filename:
+                        logger.info(f"Found matching prompt data in {filename}")
+                        return prompt_data, file_path
+                except json.JSONDecodeError as e:
+                    logger.warning(f"Invalid JSON in prompt file {file_path}: {e}")
+                except Exception as e:
+                    logger.warning(f"Error reading prompt file {file_path}: {e}")
+        
+        logger.warning(f"No matching prompt data found for {video_filename}")
+        return None, None
+    except Exception as e:
+        error_msg = f"Error searching for prompt data: {e}"
+        logger.error(error_msg)
+        raise ProcessingError(error_msg)
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+def generate_captions(video_path):
+    """
+    Generate captions for a video using OpenAI Whisper
+    
+    Args:
+        video_path (str): Path to video file
+    
+    Returns:
+        str: Path to SRT file or None if failed
+    
+    Raises:
+        CaptionError: If caption generation fails
+    """
+    try:
+        # Validate input
+        validate_video_file(video_path)
+        
+        logger.info(f"Generating captions for {video_path}")
+        
+        # Create a temporary directory for output
+        temp_dir = os.path.join(os.path.dirname(video_path), "temp_captions")
+        os.makedirs(temp_dir, exist_ok=True)
+        
+        # Output SRT file path
+        srt_path = os.path.join(temp_dir, f"{os.path.splitext(os.path.basename(video_path))[0]}.srt")
+        
         # Run Whisper CLI command
         cmd = [
             "whisper",
@@ -99,27 +244,63 @@ def generate_captions(video_path):
             "--output_format", "srt"
         ]
         
-        subprocess.run(cmd, check=True)
+        logger.info(f"Running Whisper with command: {' '.join(cmd)}")
+        
+        try:
+            # This is a slow operation, might take a while
+            subprocess.run(cmd, check=True, capture_output=True, text=True)
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Whisper command failed: {e}")
+            logger.error(f"STDOUT: {e.stdout}")
+            logger.error(f"STDERR: {e.stderr}")
+            raise CaptionError(f"Whisper command failed: {e}")
         
         # Check if SRT file was created
         if os.path.exists(srt_path):
+            logger.info(f"Successfully generated captions: {srt_path}")
             return srt_path
         else:
-            logger.warning(f"SRT file not found at {srt_path}")
+            error_msg = f"SRT file not found at expected location: {srt_path}"
+            logger.warning(error_msg)
+            if notifications_available:
+                send_alert("LoopForge: Caption Error", error_msg)
             return None
-    except Exception as e:
-        logger.error(f"Error generating captions: {e}")
+    except ValidationError as e:
+        logger.error(f"Validation error: {e}")
+        if notifications_available:
+            send_alert("LoopForge: Caption Error", f"Video validation failed: {e}")
         return None
-    finally:
-        # Clean up temporary directory
-        # shutil.rmtree(temp_dir, ignore_errors=True)
-        pass
+    except CaptionError as e:
+        # This will be caught by the retry decorator
+        logger.error(f"Caption error (will retry): {e}")
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error generating captions: {e}")
+        if notifications_available:
+            send_alert("LoopForge: Caption Error", f"Unexpected error: {e}")
+        return None
 
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
 def create_seamless_loop(video_path, output_path):
-    """Create a seamless loop from the video using FFmpeg"""
-    logger.info(f"Creating seamless loop for {video_path}")
+    """
+    Create a seamless loop from the video using FFmpeg
     
+    Args:
+        video_path (str): Path to input video
+        output_path (str): Path to output video
+    
+    Returns:
+        bool: True if successful
+    
+    Raises:
+        ProcessingError: If loop creation fails
+    """
     try:
+        # Validate input
+        validate_video_file(video_path)
+        
+        logger.info(f"Creating seamless loop for {video_path}")
+        
         # Run FFmpeg command for seamless loop
         cmd = [
             "ffmpeg",
@@ -133,124 +314,266 @@ def create_seamless_loop(video_path, output_path):
             output_path
         ]
         
-        subprocess.run(cmd, check=True)
+        logger.info(f"Running FFmpeg with command: {' '.join(cmd)}")
+        
+        try:
+            # FFmpeg operations can be resource-intensive
+            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+            logger.debug(f"FFmpeg STDOUT: {result.stdout}")
+            logger.debug(f"FFmpeg STDERR: {result.stderr}")
+        except subprocess.CalledProcessError as e:
+            logger.error(f"FFmpeg command failed: {e}")
+            logger.error(f"STDOUT: {e.stdout}")
+            logger.error(f"STDERR: {e.stderr}")
+            raise ProcessingError(f"FFmpeg command failed: {e}")
+        
+        # Verify the output file was created
+        if not os.path.exists(output_path):
+            error_msg = f"Output file not created: {output_path}"
+            logger.error(error_msg)
+            raise ProcessingError(error_msg)
+        
+        # Validate output video
+        validate_video_file(output_path)
+        
+        logger.info(f"Successfully created seamless loop: {output_path}")
+        if notifications_available:
+            send_alert("LoopForge: Processing Success", f"Created seamless loop for {os.path.basename(video_path)}")
         
         return True
+    except ValidationError as e:
+        logger.error(f"Validation error: {e}")
+        if notifications_available:
+            send_alert("LoopForge: Processing Error", f"Video validation failed: {e}")
+        return False
+    except ProcessingError as e:
+        # This will be caught by the retry decorator
+        logger.error(f"Processing error (will retry): {e}")
+        raise
     except Exception as e:
-        logger.error(f"Error creating seamless loop: {e}")
+        logger.error(f"Unexpected error creating seamless loop: {e}")
+        if notifications_available:
+            send_alert("LoopForge: Processing Error", f"Error creating seamless loop: {e}")
         return False
 
 def add_b_roll(video_path, output_path, config):
-    """Add random B-roll footage to the video"""
-    logger.info(f"Adding B-roll to {video_path}")
+    """
+    Add random B-roll footage to the video
     
-    # Get B-roll directory from config
-    b_roll_dir = os.path.join(script_path, config.get("paths", {}).get("b_roll_dir", "assets/b_roll"))
+    Args:
+        video_path (str): Path to input video
+        output_path (str): Path to output video
+        config (dict): Configuration data
     
-    if not os.path.exists(b_roll_dir):
-        logger.warning(f"B-roll directory not found: {b_roll_dir}")
-        return False
+    Returns:
+        bool: True if successful
     
-    # Get list of B-roll clips
-    b_roll_files = [f for f in os.listdir(b_roll_dir) if f.endswith((".mp4", ".mov", ".avi"))]
-    
-    if not b_roll_files:
-        logger.warning("No B-roll clips found")
-        return False
-    
-    # Select a random B-roll clip
-    b_roll_file = os.path.join(b_roll_dir, random.choice(b_roll_files))
-    
+    Raises:
+        BRollError: If B-roll addition fails
+    """
     try:
-        # Load the main video and B-roll
-        main_clip = mp.VideoFileClip(video_path)
-        b_roll_clip = mp.VideoFileClip(b_roll_file)
+        # Validate input
+        validate_video_file(video_path)
         
-        # Resize B-roll to match main video
-        b_roll_clip = b_roll_clip.resize(main_clip.size)
+        logger.info(f"Adding B-roll to {video_path}")
         
-        # If B-roll is too long, trim it
-        if b_roll_clip.duration > main_clip.duration:
-            b_roll_clip = b_roll_clip.subclip(0, main_clip.duration)
+        # Get B-roll directory from config
+        b_roll_dir = os.path.join(script_path, config.get("paths", {}).get("b_roll_dir", "assets/b_roll"))
         
-        # Set B-roll opacity
-        b_roll_clip = b_roll_clip.set_opacity(0.3)
+        if not os.path.exists(b_roll_dir):
+            error_msg = f"B-roll directory not found: {b_roll_dir}"
+            logger.warning(error_msg)
+            return False
         
-        # Overlay B-roll on main video
-        final_clip = mp.CompositeVideoClip([main_clip, b_roll_clip])
+        # Get list of B-roll clips
+        b_roll_files = [f for f in os.listdir(b_roll_dir) if f.endswith((".mp4", ".mov", ".avi"))]
         
-        # Write output
-        final_clip.write_videofile(output_path, codec="libx264", audio_codec="aac")
+        if not b_roll_files:
+            error_msg = "No B-roll clips found"
+            logger.warning(error_msg)
+            return False
         
-        # Close clips
-        main_clip.close()
-        b_roll_clip.close()
-        final_clip.close()
+        # Select a random B-roll clip
+        b_roll_file = os.path.join(b_roll_dir, random.choice(b_roll_files))
+        logger.info(f"Selected B-roll clip: {b_roll_file}")
         
-        return True
+        try:
+            # Load the main video and B-roll
+            logger.info("Loading video clips")
+            main_clip = mp.VideoFileClip(video_path)
+            b_roll_clip = mp.VideoFileClip(b_roll_file)
+            
+            # Resize B-roll to match main video
+            logger.info(f"Resizing B-roll to match main video dimensions: {main_clip.size}")
+            b_roll_clip = b_roll_clip.resize(main_clip.size)
+            
+            # If B-roll is too long, trim it
+            if b_roll_clip.duration > main_clip.duration:
+                logger.info(f"Trimming B-roll from {b_roll_clip.duration}s to {main_clip.duration}s")
+                b_roll_clip = b_roll_clip.subclip(0, main_clip.duration)
+            
+            # Set B-roll opacity
+            b_roll_opacity = config.get("video", {}).get("b_roll_opacity", 0.3)
+            logger.info(f"Setting B-roll opacity to {b_roll_opacity}")
+            b_roll_clip = b_roll_clip.set_opacity(b_roll_opacity)
+            
+            # Overlay B-roll on main video
+            logger.info("Compositing video clips")
+            final_clip = mp.CompositeVideoClip([main_clip, b_roll_clip])
+            
+            # Write output
+            logger.info(f"Writing output to {output_path}")
+            final_clip.write_videofile(
+                output_path, 
+                codec="libx264", 
+                audio_codec="aac",
+                logger=None  # Silence moviepy's logger which is very verbose
+            )
+            
+            # Close clips to release resources
+            logger.info("Cleaning up resources")
+            main_clip.close()
+            b_roll_clip.close()
+            final_clip.close()
+            
+            logger.info(f"Successfully added B-roll: {output_path}")
+            
+            return True
+        except Exception as e:
+            error_msg = f"Error processing video with MoviePy: {e}"
+            logger.error(error_msg)
+            raise BRollError(error_msg)
+    except ValidationError as e:
+        logger.error(f"Validation error: {e}")
+        if notifications_available:
+            send_alert("LoopForge: B-Roll Error", f"Video validation failed: {e}")
+        return False
+    except BRollError as e:
+        logger.error(f"B-roll error: {e}")
+        if notifications_available:
+            send_alert("LoopForge: B-Roll Error", f"Error adding B-roll: {e}")
+        return False
     except Exception as e:
-        logger.error(f"Error adding B-roll: {e}")
+        logger.error(f"Unexpected error adding B-roll: {e}")
+        if notifications_available:
+            send_alert("LoopForge: B-Roll Error", f"Unexpected error: {e}")
         return False
 
 def add_watermark(video_path, output_path, config):
-    """Add watermark to the video"""
-    logger.info(f"Adding watermark to {video_path}")
+    """
+    Add watermark to the video
     
-    video_config = config.get("video", {})
-    watermark_file = video_config.get("watermark_file")
+    Args:
+        video_path (str): Path to input video
+        output_path (str): Path to output video
+        config (dict): Configuration data
     
-    if not watermark_file:
-        logger.warning("No watermark file specified in config")
-        return False
+    Returns:
+        bool: True if successful
     
-    # Get watermark path
-    branding_dir = os.path.join(script_path, config.get("paths", {}).get("branding_dir", "assets/branding"))
-    watermark_path = os.path.join(branding_dir, watermark_file)
-    
-    if not os.path.exists(watermark_path):
-        logger.warning(f"Watermark file not found: {watermark_path}")
-        return False
-    
+    Raises:
+        WatermarkError: If watermarking fails
+    """
     try:
-        # Load the video and watermark
-        video_clip = mp.VideoFileClip(video_path)
-        watermark = mp.ImageClip(watermark_path)
+        # Validate input video
+        validate_video_file(video_path)
         
-        # Set watermark opacity
-        watermark_opacity = video_config.get("watermark_opacity", 0.7)
-        watermark = watermark.set_opacity(watermark_opacity)
+        logger.info(f"Adding watermark to {video_path}")
         
-        # Resize watermark (e.g., to 10% of video width)
-        watermark_width = video_clip.w * 0.1
-        watermark = watermark.resize(width=watermark_width)
+        video_config = config.get("video", {})
+        watermark_file = video_config.get("watermark_file")
         
-        # Position watermark
-        watermark_position = video_config.get("watermark_position", "bottom-right")
-        margin = 10  # Margin from the edge
+        if not watermark_file:
+            error_msg = "No watermark file specified in config"
+            logger.warning(error_msg)
+            return False
         
-        if watermark_position == "bottom-right":
-            watermark = watermark.set_position((video_clip.w - watermark.w - margin, video_clip.h - watermark.h - margin))
-        elif watermark_position == "bottom-left":
-            watermark = watermark.set_position((margin, video_clip.h - watermark.h - margin))
-        elif watermark_position == "top-right":
-            watermark = watermark.set_position((video_clip.w - watermark.w - margin, margin))
-        elif watermark_position == "top-left":
-            watermark = watermark.set_position((margin, margin))
+        # Get watermark path
+        branding_dir = os.path.join(script_path, config.get("paths", {}).get("branding_dir", "assets/branding"))
+        watermark_path = os.path.join(branding_dir, watermark_file)
         
-        # Overlay watermark on video
-        final_clip = mp.CompositeVideoClip([video_clip, watermark])
+        if not os.path.exists(watermark_path):
+            error_msg = f"Watermark file not found: {watermark_path}"
+            logger.warning(error_msg)
+            return False
         
-        # Write output
-        final_clip.write_videofile(output_path, codec="libx264", audio_codec="aac")
-        
-        # Close clips
-        video_clip.close()
-        watermark.close()
-        final_clip.close()
-        
-        return True
+        try:
+            # Load the video and watermark
+            logger.info("Loading video and watermark")
+            video_clip = mp.VideoFileClip(video_path)
+            watermark = mp.ImageClip(watermark_path)
+            
+            # Set watermark opacity
+            watermark_opacity = video_config.get("watermark_opacity", 0.7)
+            logger.info(f"Setting watermark opacity to {watermark_opacity}")
+            watermark = watermark.set_opacity(watermark_opacity)
+            
+            # Resize watermark (e.g., to 10% of video width)
+            watermark_size = video_config.get("watermark_size", 0.1)  # Default to 10% of video width
+            watermark_width = video_clip.w * watermark_size
+            logger.info(f"Resizing watermark to width {watermark_width:.1f}px")
+            watermark = watermark.resize(width=watermark_width)
+            
+            # Position watermark
+            watermark_position = video_config.get("watermark_position", "bottom-right")
+            margin = video_config.get("watermark_margin", 10)  # Margin from the edge
+            
+            # Calculate position based on specified corner
+            logger.info(f"Positioning watermark at {watermark_position} with margin {margin}px")
+            if watermark_position == "bottom-right":
+                position = (video_clip.w - watermark.w - margin, video_clip.h - watermark.h - margin)
+            elif watermark_position == "bottom-left":
+                position = (margin, video_clip.h - watermark.h - margin)
+            elif watermark_position == "top-right":
+                position = (video_clip.w - watermark.w - margin, margin)
+            elif watermark_position == "top-left":
+                position = (margin, margin)
+            else:
+                logger.warning(f"Unknown watermark position: {watermark_position}. Using bottom-right.")
+                position = (video_clip.w - watermark.w - margin, video_clip.h - watermark.h - margin)
+            
+            # Apply position
+            watermark = watermark.set_position(position)
+            
+            # Overlay watermark on video
+            logger.info("Compositing video with watermark")
+            final_clip = mp.CompositeVideoClip([video_clip, watermark])
+            
+            # Write output
+            logger.info(f"Writing output to {output_path}")
+            final_clip.write_videofile(
+                output_path, 
+                codec="libx264", 
+                audio_codec="aac",
+                logger=None  # Silence moviepy's logger
+            )
+            
+            # Close clips to release resources
+            logger.info("Cleaning up resources")
+            video_clip.close()
+            watermark.close()
+            final_clip.close()
+            
+            logger.info(f"Successfully added watermark: {output_path}")
+            return True
+        except Exception as e:
+            error_msg = f"Error processing video with MoviePy: {e}"
+            logger.error(error_msg)
+            raise WatermarkError(error_msg)
+    except ValidationError as e:
+        logger.error(f"Validation error: {e}")
+        if notifications_available:
+            send_alert("LoopForge: Watermark Error", f"Video validation failed: {e}")
+        return False
+    except WatermarkError as e:
+        logger.error(f"Watermark error: {e}")
+        if notifications_available:
+            send_alert("LoopForge: Watermark Error", f"Error adding watermark: {e}")
+        return False
     except Exception as e:
-        logger.error(f"Error adding watermark: {e}")
+        logger.error(f"Unexpected error adding watermark: {e}")
+        if notifications_available:
+            send_alert("LoopForge: Watermark Error", f"Unexpected error: {e}")
         return False
 
 def add_captions_to_video(video_path, captions_path, output_path):
