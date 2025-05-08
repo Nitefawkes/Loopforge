@@ -1,0 +1,45 @@
+# Virtual Environment
+venv/
+env/
+.env
+
+# API keys and configuration
+config/config.json
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Generated files
+data/prompts_to_render/*
+data/rendered_clips/*
+data/ready_to_post/*
+data/uploads/*
+!data/prompts_to_render/.gitkeep
+!data/rendered_clips/.gitkeep
+!data/ready_to_post/.gitkeep
+!data/uploads/.gitkeep
+
+# Logs
+*.log
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Temporary files
+tmp/
+temp/

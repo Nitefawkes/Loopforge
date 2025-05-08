@@ -160,5 +160,33 @@ class TestRunPipeline(unittest.TestCase):
         # We just check that exit was called at least once with code 1
         mock_exit.assert_called_with(1)
 
+    @patch('subprocess.Popen')
+    def test_run_api_prototype_success(self, mock_popen):
+        """Test the run_api_prototype function with successful execution."""
+        # Configure mock
+        mock_process = MagicMock()
+        mock_process.wait.return_value = 0
+        mock_popen.return_value = mock_process
+        
+        # Call the function
+        result = run_pipeline.run_api_prototype(self.args, self.config)
+        
+        # Assertions
+        self.assertTrue(result)
+        mock_popen.assert_called_once()
+        mock_process.wait.assert_called_once()
+    
+    @patch('subprocess.Popen')
+    def test_run_api_prototype_exception(self, mock_popen):
+        """Test the run_api_prototype function when an exception is raised."""
+        # Configure mock to raise an exception
+        mock_popen.side_effect = Exception("Test API exception")
+        
+        # Call the function
+        result = run_pipeline.run_api_prototype(self.args, self.config)
+        
+        # Assertions
+        self.assertFalse(result)
+
 if __name__ == '__main__':
     unittest.main() 
